@@ -1,237 +1,236 @@
-# Template for Capstone
-이 레파지토리는 학생들이 캡스톤 프로젝트 결과물을 위한 레파지토리 생성시에 참고할 내용들을 담고 있습니다.
-1. 레파지토리 생성
-2. 레파지토리 구성
-3. 레파지토리 제출 
-4. README.md 가이드라인
-5. README.md 작성팁
+# RAG Pipeline Offloading via NVMe-oF for Edge LLM Inference
+
+Edge 환경에서 대규모 RAG를 효율적으로 수행하기 위한 NVMe-oF 기반 RAG Pipeline Offloading 시스템입니다.
+RAG 검색 과정에서 발생하는 원격 I/O와 네트워크 데이터 이동을 줄이고, Edge 환경에서도 대규모 Vector DB를 활용할 수 있도록 합니다.
 
 ---
 
-## 1. 레파지토리 생성
-- [https://classroom.github.com/a/i3v_IYnd]
-- 위 Github Classroom 링크에 접속해 본인 조의 github 레파지토리를 생성하세요.
+## 1. 프로젝트 배경
 
-<img width="1171" height="592" alt="image" src="https://github.com/user-attachments/assets/22919da2-dee5-4ca8-98f1-3dd63d7a6013" />
+최근 Large Language Model(LLM)은 다양한 분야에서 활용되고 있지만,
+학습하지 않은 정보에 대해 잘못된 내용을 생성하는 환각(Hallucination) 문제와 최신 정보를 반영하기 어렵다는 한계가 있다.
+
+Retrieval-Augmented Generation(RAG)은 외부 문서나 데이터베이스에서 관련 정보를 검색하여 LLM의 입력에 추가함으로써 이러한 문제를 완화한다.
+하지만 RAG에서 사용하는 Vector DB의 규모가 커질수록 저장 공간과 데이터 접근에 대한 부담도 증가한다.
+
+특히 자원이 제한된 Edge Device에서는 대규모 Vector DB를 로컬에 저장하기 어렵기 때문에 Vector DB를 별도의 Storage Server에 저장하는 구조가 필요하다.
+이때 Vector DB는 Storage Server에 있지만 Similarity Search를 Edge Device에서 수행한다면, 검색 과정에서 원격 Vector Index와 데이터를 반복적으로 읽어야 한다.
+이 과정에서 Edge Device와 Storage Server 사이에 반복적인 네트워크 I/O가 발생하며 데이터 이동량과 검색 지연이 증가할 수 있다.
+
+### 1.1. 프로젝트 소개
+본 프로젝트는 이러한 문제를 해결하기 위해
+**RAG Pipeline을 데이터가 위치한 Storage Server에서 수행하는 Near-Data Processing 구조**를 구현한다.
+
+기존에는 Edge Device가 원격 Storage Server의 Vector DB에 접근하여
+RAG를 수행하지만, 제안 구조에서는 다음 과정을 Storage Server로
+Offloading한다.
+
+<img width="535" height="197" alt="image" src="https://github.com/user-attachments/assets/ea515e32-adbf-41e6-836b-42e4d687d832" />
 
 
-- 레포지토리 생성 시 팀명은 `TEAM-{조 번호}` 형식으로 생성하세요.
-- 예를 들어, 2026년도 3조의 팀명은 `TEAM-03` 입니다.
-- 이 경우 `Capstone2026-team-03`이란 이름으로 레파지토리가 생성됩니다.
+Storage Server는 처리 결과로 생성된 **Token ID Sequence**를 Edge Device에
+전달하고, Edge Device는 반환된 Token을 이용하여 LLM inference를 수행한다.
+
+Edge Device와 Storage Server 간의 통신에는 **NVMe-oF/TCP**를 사용하며,
+RAG Offloading 요청을 처리하기 위해 **Custom NVMe Command**를 사용한다.
 
 ---
 
-## 2. 레파지토리 구성
-- 레파지토리 내에 README.md 파일 생성하고 아래의 가이드라인과 작성팁을 참고하여 README.md 파일을 작성하세요. (이 레파지토리의 SAMPLE_README.md 참조)
-- 레파지토리 내에 docs 디렉토리를 생성하고 docs 디렉토리 내에는 과제 수행 하면서 작성한 각종 보고서, 발표자료를 올려둡니다. (이 레파지토리의 docs 디렉토리 참조)
-- 그 밖에 레파지토리의 폴더 구성은 과제 결과물에 따라 자유롭게 구성하되 가급적 코드의 목적이나 기능에 따라 디렉토리를 나누어 구성하세요.
+## 2. 시스템 구성
+
+전체 시스템은 크게 **Edge Device**와 **Storage Server**로 구성된다.
+<img width="509" height="371" alt="image" src="https://github.com/user-attachments/assets/9a60c15a-4512-4024-ae91-9e6dc2f43c35" />
+
+
+- **Edge Device**
+  - 사용자 Query 입력
+  - RAG Offloading 요청
+  - 결과 Token 수신
+  - LLM Inference 수행
+
+- **Storage Server**
+  - Vector DB 관리
+  - Embedding
+  - Similarity Search
+  - Query Generation
+  - Tokenization
+  - 결과 Token 기록
+
+두 장치는 **NVMe-oF/TCP**를 통해 연결된다.
+
+### 2.1. 사용 기술
+
+| 구분 | 기술 | 역할 |
+|---|---|---|
+| LLM Runtime | llama.cpp | Edge LLM 실행 및 Token 입력 처리 |
+| LLM | Gemma 3 270M | 답변 생성 |
+| 통신 | NVMe-oF/TCP | Edge와 Storage Server 연결 |
+| Storage Framework | SPDK | NVMe-oF Target 및 Custom Command 처리 |
+| Vector DB | PostgreSQL + pgvectorscale | Vector 저장 및 Similarity Search |
+| Embedding | BGE-M3 | Query Embedding 생성 |
+| Offloading Interface | Custom NVMe Command | RAG Offloading 요청 전달 |
+| File Mapping | FIEMAP | 파일의 물리적 저장 영역 확인 |
+| Result I/O | Direct I/O | Page Cache를 우회하여 결과 Token 읽기 |
 
 ---
 
-## 3. 레파지토리 제출 
+## 3. 개발 결과
 
-- **`[주의]` 레파지토리 제출**은 해당 레파지토리의 ownership을 **학과 계정**으로 넘기는 것이므로 되돌릴 수 없습니다.
-- **레파지토리 제출** 전, 더 이상 수정 사항이 없는지 다시 한번 확인하세요.
-- github 레파지토리에서 Settings > General > Danger zone > Transfer 클릭
-  <img src="https://github.com/user-attachments/assets/cb2361d4-e07e-4b5d-9116-aa80dddd8a8b" alt="소유주 변경 경로" width="500" />
-  
-- [ Specify an organization or username ]에 'PNUCSE'를 입력하고 확인 메세지를 입력하세요.
-  <img src="https://github.com/user-attachments/assets/7c63955d-dcfe-4ac3-bdb6-7d2620575f3a" alt="소유주 변경" width="400" />
+제안한 RAG Pipeline Offloading 구조의 효과를 확인하기 위해
+기존 방식과 제안 방식의 데이터 이동량 및 RAG 단계별 처리 시간을 비교하였다.
+
+실험 환경은 다음과 같다.
+
+<img width="851" height="215" alt="image" src="https://github.com/user-attachments/assets/62884a87-1a7e-4b4e-aaae-44fbaae2b2d0" />
+
+
+### 4.1. 데이터 이동량
+
+Edge Device와 Storage Server 사이의 총 데이터 이동량을 측정한 결과 다음과 같다.
+<img width="851" height="391" alt="image" src="https://github.com/user-attachments/assets/620a7bf1-e4aa-479d-b847-0ddc0229928a" />
+
+| 방식 | 데이터 이동량 |
+|---|---:|
+| 기존 방식 | 121 MB |
+| RAG Offloading | 33.1 MB |
+
+제안 방식에서는 데이터 이동량이 **87.9 MB 감소**하였으며,
+기존 방식 대비 약 **72.6% 감소**하였다.
+
+### 4.2. RAG 단계별 Latency
+<img width="851" height="374" alt="image" src="https://github.com/user-attachments/assets/b3ca525b-794c-46e6-820b-cddde01b47dd" />
+
+| 단계 | 기존 방식 | Offloading | 변화 |
+|---|---:|---:|---:|
+| Embedding | 191.13 ms | 77.18 ms | 감소 |
+| Similarity Search | 107.17 ms | 56.98 ms | 약 46.8% 감소 |
+| Tokenization | 28.40 ms | 27.20 ms | 1.20 ms 감소 |
+
+특히 Similarity Search를 Storage Server에서 수행함으로써
+원격 Vector Index 접근 과정에서 발생하는 I/O를 줄일 수 있었다.
+
+Similarity Search 내부의 I/O 시간은 다음과 같이 감소하였다.
+<img width="851" height="365" alt="image" src="https://github.com/user-attachments/assets/54fc1e41-003c-4990-9c60-0ca1578ffdfc" />
+
+
+```text
+기존 방식      : 77.180 ms
+RAG Offloading : 41.272 ms
+```
+
+약 **46.5% 감소**한 결과를 확인하였다.
+
+이를 통해 데이터가 위치한 Storage Server에서 RAG Pipeline을 수행하는 구조가
+Edge와 Storage Server 사이의 데이터 이동과 원격 데이터 접근 오버헤드를
+감소시킬 수 있음을 확인하였다.
 
 ---
 
-## 4. README.md 가이드 라인
-- README 파일 작성시에 아래의 5가지 항목의 내용은 필수적으로 포함해야 합니다.
-- 아래의 항목이외에 프로젝트의 이해를 돕기 위한 내용을 추가해도 됩니다.
-- SAMPLE_README.md 이 단순한 형태의 예제이니 참고하세요.
+## 5. 설치 및 실행 방법
+### 5.1. Repository Clone
 
-```markdown
-### 1. 프로젝트 배경
-#### 1.1. 국내외 시장 현황 및 문제점
-> 시장 조사 및 기존 문제점 서술
-
-#### 1.2. 필요성과 기대효과
-> 왜 이 프로젝트가 필요한지, 기대되는 효과 등
-
-### 2. 개발 목표
-#### 2.1. 목표 및 세부 내용
-> 전체적인 개발 목표, 주요 기능 및 기획 내용
-
-#### 2.2. 기존 서비스 대비 차별성 
-> 유사 서비스 비교 및 차별점 부각
-
-#### 2.3. 사회적 가치 도입 계획 
-> 프로젝트의 공공성, 지속 가능성, 환경 보호 등
-### 3. 시스템 설계
-#### 3.1. 시스템 구성도
-> 이미지 혹은 텍스트로 시스템 아키텍쳐 작성
->
-#### 3.2. 사용 기술
-> 프론트엔드, 백엔드, API 등 구체 기술 스택
-
-### 4. 개발 결과
-#### 4.1. 전체 시스템 흐름도
-> 기능 흐름 설명 및 도식화 가능
->
-#### 4.2. 기능 설명 및 주요 기능 명세서
-> 주요 기능에 대한 상세 설명, 각 기능의 입력/출력 및 설명
->
-#### 4.3. 디렉토리 구조
->
-#### 4.4. 산업체 멘토링 의견 및 반영 사항
-> 멘토 피드백과 적용한 사례 정리
-
-### 5. 설치 및 실행 방법
->
-#### 5.1. 설치절차 및 실행 방법
-> 설치 명령어 및 준비 사항, 실행 명령어, 포트 정보 등
-#### 5.2. 오류 발생 시 해결 방법
-> 선택 사항, 자주 발생하는 오류 및 해결책 등
-
-### 6. 소개 자료 및 시연 영상
-#### 6.1. 프로젝트 소개 자료
-> PPT 등
-#### 6.2. 시연 영상
-> 영상 링크 또는 주요 장면 설명
-
-### 7. 팀 구성
-#### 7.1. 팀원별 소개 및 역할 분담
->
-#### 7.2. 팀원 별 참여 후기
-> 개별적으로 느낀 점, 협업, 기술적 어려움 극복 사례 등
-
-### 8. 참고 문헌 및 출처
-
+```bash
+git clone https://github.com/pnucse-capstone2026/capstone-2026-team-47.git
+cd capstone-2026-team-47
 ```
 
-## 5. README.md 작성팁 
-* 마크다운 언어를 이용해 README.md 파일을 작성할 때 참고할 수 있는 마크다운 언어 문법을 공유합니다.  
-* 다양한 예제와 보다 자세한 문법은 [이 문서](https://www.markdownguide.org/basic-syntax/)를 참고하세요.
+---
 
-### 5.1. 헤더 Header
+### 5.2. Storage Server
+
+SPDK 디렉터리로 이동한다.
+
+```bash
+cd src/storage-server/spdk-ndp
 ```
-# This is a Header 1
-## This is a Header 2
-### This is a Header 3
-#### This is a Header 4
-##### This is a Header 5
-###### This is a Header 6
-####### This is a Header 7 은 지원되지 않습니다.
+
+필요한 dependency를 설치한다.
+
+```bash
+sudo ./scripts/pkgdep.sh
 ```
-<br />
 
-### 5.2. 인용문 BlockQuote
+SPDK를 build한다.
+
+```bash
+./configure
+make -j$(nproc)
 ```
-> This is a first blockqute.
->	> This is a second blockqute.
->	>	> This is a third blockqute.
+
+이후 NVMe SSD와 NVMe-oF Target을 설정하고
+프로젝트에서 구현한 Storage Server 애플리케이션을 실행한다.
+
+설정 시 필요한 주요 값은 다음과 같다.
+
+---
+
+### 5.3. Edge Device
+
+llama.cpp 디렉터리로 이동한다.
+
+```bash
+cd src/edge/llama.cpp
 ```
-> This is a first blockqute.
->	> This is a second blockqute.
->	>	> This is a third blockqute.
-<br />
 
-### 5.3. 목록 List
-* **Ordered List**
+Jetson 환경에서 llama.cpp를 build한다.
+
+```bash
+cmake -B build -DGGML_CUDA=ON
+cmake --build build -j$(nproc)
 ```
-1. first
-2. second
-3. third  
+
+Storage Server의 NVMe-oF Target에 연결한 후
+연결된 NVMe Device와 Mount Path를 확인한다.
+
+```bash
+nvme list
 ```
-1. first
-2. second
-3. third
-<br />
 
-* **Unordered List**
+프로젝트에서 사용하는 환경 변수를 설정한다.
+
+```bash
+export LLAMA_NVME_DEVICE=/dev/nvmeXn1
+export LLAMA_MOUNT_PATH=/mnt/nvmeof
 ```
-* 하나
-  * 둘
 
-+ 하나
-  + 둘
+> 위 경로는 예시이며 실제 환경에 맞게 변경한다.
 
-- 하나
-  - 둘
+LLM을 실행한다.
+
+```bash
+./build/bin/llama-cli -m <MODEL_PATH>
 ```
-* 하나
-  * 둘
 
-+ 하나
-  + 둘
+RAG Pipeline Offloading을 사용하려면 CLI에서 다음 명령을 입력한다.
 
-- 하나
-  - 둘
-<br />
-
-### 5.4. 코드 CodeBlock
-* 코드 블럭 이용 '``'
+```text
+/toggle-rag-offload
 ```
-여러줄 주석 "```" 이용
-"```
-#include <stdio.h>
-int main(void){
-  printf("Hello world!");
-  return 0;
-}
-```"
 
-단어 주석 "`" 이용
-"`Hello world`"
+이후 Query를 입력하면 Storage Server에서 RAG Pipeline과
+Tokenization을 수행한 뒤 반환된 Token ID를 이용하여
+Edge Device에서 LLM inference가 수행된다.
 
-* 큰 따움표(") 없이 사용하세요.
-``` 
-<br />
+## 6. 소개 자료
 
-### 5.5. 링크 Link
-```
-[Title](link)
-[부산대학교 정보컴퓨터공학부](https://cse.pusan.ac.kr/cse/index..do)
-
-<link>
-<https://cse.pusan.ac.kr/cse/index..do>
-``` 
-[부산대학교 정보컴퓨터공학부](https://cse.pusan.ac.kr/cse/index..do)
-
-<https://cse.pusan.ac.kr/cse/index..do>
-<br />
-
-### 5.6. 강조 Highlighting
-```
-*single asterisks*
-_single underscores_
-**double asterisks**
-__double underscores__
-~~cancelline~~
-```
-*single asterisks* <br />
-_single underscores_ <br />
-**double asterisks** <br />
-__double underscores__ <br />
-~~cancelline~~  <br />
-<br />
-
-### 5.7. 이미지 Image
-```
-<img src="image URL" width="600px" title="Title" alt="Alt text"></img>
-![Alt text](image URL "Optional title")
-```
-- 웹에서 작성한다면 README.md 내용 안으로 이미지를 드래그 앤 드롭하면 이미지가 생성됩니다.
-- 웹이 아닌 로컬에서 작성한다면, github issue에 이미지를 드래그 앤 드롭하여 image url 을 얻을 수 있습니다. (URL만 복사하고 issue는 제출 안 함.)
-  <img src="https://github.com/user-attachments/assets/0fe3bff1-7a2b-4df3-b230-cac4ef5f6d0b" alt="이슈에 image 올림" width="600" />
-  <img src="https://github.com/user-attachments/assets/251c6d42-b36b-4ad4-9cfa-fa2cc67a9a50" alt="image url 복사" width="600" />
+[![RAG Pipeline Offloading](https://img.youtube.com/vi/fTN8RPKtIdo/0.jpg)](https://www.youtube.com/watch?v=fTN8RPKtIdo)
 
 
-### 5.8. 유튜브 영상 추가
-```markdown
-[![영상 이름](유튜브 영상 썸네일 URL)](유튜브 영상 URL)
-[![부산대학교 정보컴퓨터공학부 소개](http://img.youtube.com/vi/zh_gQ_lmLqE/0.jpg)](https://www.youtube.com/watch?v=zh_gQ_lmLqE)    
-```
-[![부산대학교 정보컴퓨터공학부 소개](http://img.youtube.com/vi/zh_gQ_lmLqE/0.jpg)](https://www.youtube.com/watch?v=zh_gQ_lmLqE)    
+## 7. 팀 구성
 
-- 이때 유튜브 영상 썸네일 URL은 유투브 영상 URL로부터 다음과 같이 얻을 수 있습니다.
+| 이름 | 주요 역할 |
+|---|---|
+| 양윤성 | Edge Device 및 llama.cpp 기반 LLM inference 구현 |
+| 나예은 | Storage Server 및 SPDK 기반 RAG Pipeline 구현 |
 
-- `Youtube URL`: https://www.youtube.com/watch?v={동영상 ID}
-- `Youtube Thumbnail URL`: http://img.youtube.com/vi/{동영상 ID}/0.jpg 
-- 예를 들어, https://www.youtube.com/watch?v=zh_gQ_lmLqE 라고 하면 썸네일의 주소는 http://img.youtube.com/vi/zh_gQ_lmLqE/0.jpg 이다.
+## 8. 참고 문헌 및 출처
+- **llama.cpp**
+  - Original Project: https://github.com/ggml-org/llama.cpp
+  - Modified Source: https://github.com/kmjstr35/llama.cpp
 
+- **SPDK**
+  - Original Project: https://github.com/spdk/spdk
+  - Modified Source: https://github.com/kmjstr35/spdk-ndp
+
+- **pgvectorscale**
+  - https://github.com/timescale/pgvectorscale
