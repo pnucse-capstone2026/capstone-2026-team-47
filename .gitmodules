@@ -1,0 +1,8 @@
+[submodule "src/edge/llama.cpp"]
+	path = src/edge/llama.cpp
+	url = https://github.com/kmjstr35/llama.cpp.git
+	branch = master
+[submodule "src/storage-server/spdk-ndp"]
+	path = src/storage-server/spdk-ndp
+	url = https://github.com/kmjstr35/spdk-ndp.git
+	branch = ndp-llama
